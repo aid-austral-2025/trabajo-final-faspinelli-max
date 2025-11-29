@@ -15,6 +15,7 @@ library(scales)
 library(DT)
 library(shinydashboard)
 library(bs4Dash)
+library(plotly)
 
 
 # importar archivo de Solicitudes
@@ -61,6 +62,7 @@ ticket$fechavenc <- as.Date(ticket$fechavenc)
 ticket <- ticket %>%
   select (fecha,
           fechavenc,
+          area,
           sede_nombre_sectororigen,
           sector_origen,
           motivo,
@@ -102,9 +104,18 @@ ticket <- ticket %>%
     )
   )
 
-# vamos a plantear el primer gráfico que muestre la cantidad de ticket solicitadas por sector
+# definimos os filtros
 ui <- fluidPage(
-  titlePanel("Tablero de Solicitudes por sector"),
+  
+  tags$head(
+    tags$link(rel="stylesheet",
+              href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css")
+  ),
+  
+  tags$h1(
+    "Tablero de Solicitudes por sector",
+    style = "font-weight:700; margin-bottom:20px;"
+  ),
   
   fluidRow(
     # Filtros (columna izquierda)
@@ -126,16 +137,15 @@ ui <- fluidPage(
         ),
         
         selectInput(
+          "filtro_area",
+          "Area:",
+          choices = c("Todos", sort(unique(ticket$area))),
+          selected = "Club"
+        ),
+        selectInput(
           "filtro_estado",
           "Estado:",
           choices = c("Todos", sort(unique(ticket$estado_resumen_ticket))),
-          selected = "Aprobado"
-        ),
-        
-        selectInput(
-          "filtro_motivo",
-          "Motivo:",
-          choices = c("Todos", sort(unique(ticket$motivo))),
           selected = "Todos"
         )
       )
@@ -145,43 +155,100 @@ ui <- fluidPage(
     column(
       width = 10,
       
-      # Fila de tarjetas KPI
-      fluidRow(
-        column(3, uiOutput("card_periodo")),
-        column(3, uiOutput("card_tickets")),
-        column(3, uiOutput("card_importe_solicitado")),
-        column(3, uiOutput("card_importe_aprobado"))
-      ),
-      
-      br(),
-      
-      # Fila de gráficos y tablas
-      fluidRow(
-        column(
-          width = 6,
-          h3("Tickets por sector"),
-          plotOutput("grafico_tickets", height = "350px"),
+      tabsetPanel(
+        id = "tabs",
+        
+        # ----------------------------- #
+        # TAB PRINCIPAL (Resumen)
+        # ----------------------------- #
+        tabPanel(
+          "Resumen",
+          
+          fluidRow(
+            style = "margin-top:20px;",
+            column(3, uiOutput("card_periodo")),
+            column(3, uiOutput("card_tickets")),
+            column(3, uiOutput("card_importe_solicitado")),
+            column(3, uiOutput("card_importe_aprobado"))
+          ),
+          
           br(),
-          DT::dataTableOutput("tabla_resumen")
+          
+          fluidRow(
+            column(
+              width = 6,
+              h3("Solicitudes por sector"),
+              plotlyOutput("grafico_tickets", height = "350px"),   # 👈 CAMBIAMOS A plotly
+              br(),
+              DT::dataTableOutput("tabla_resumen")
+            ),
+            column(
+              width = 6,
+              h3("Importes solicitados por sector"),
+              plotOutput("grafico_importes", height = "350px"),
+              br(),
+              DT::dataTableOutput("tabla_importes")
+            )
+          )
         ),
-        column(
-          width = 6,
-          h3("Importes solicitados por sector"),
-          plotOutput("grafico_importes", height = "350px"),
+        
+        # ----------------------------- #
+        # TAB DETALLE SECTOR
+        # ----------------------------- #
+        tabPanel(
+          "Detalle sector",
+          
+          # Encabezado tipo tarjeta
+          div(
+            h3(textOutput("titulo_detalle_sector")),
+            style = "
+              background:#f5f5f5;
+              padding:12px 18px;
+              border-radius:8px;
+              margin-top:10px;
+              margin-bottom:18px;
+              font-weight:700;
+              color:#333;
+              box-shadow:0 2px 6px rgba(0,0,0,0.08);
+            "
+                  ),
+          
+          plotOutput("grafico_evolucion_sector", height = "300px"),
           br(),
-          DT::dataTableOutput("tabla_importes")
+          DTOutput("tabla_evolucion_sector")),
+          
+        # ----------------------------- #
+        # TAB ACERDA DEL TABLERO
+        # ----------------------------- #
+        
+        tabPanel(
+          "Acerca del Tablero",
+          h2("Descripción del tablero"),
+          p("
+            
+          "),
+          p("
+            
+          "),
+          p("
+            .
+          "
+          )
         )
       )
     )
   )
 )
 
+sector_click <- reactiveVal(NULL)
 
+##########################################
 #---------------- SERVER ----------------#
+##########################################
 
 server <- function(input, output, session) {
   
-  # datos filtrados según año, mes y motivo
+  # datos filtrados según año, mes y area
   ticket_filtrado <- reactive({
     req(input$filtro_anio, input$filtro_mes)
     
@@ -190,13 +257,12 @@ server <- function(input, output, session) {
         anio == input$filtro_anio,
         mes  == as.integer(input$filtro_mes)
       )
+    if (input$filtro_area != "Todos") {
+      data <- data %>% filter(area == input$filtro_area)
+    }
     
     if (!is.null(input$filtro_estado) && input$filtro_estado != "Todos") {
       data <- data %>% filter(estado_resumen_ticket == input$filtro_estado)
-    }
-    
-    if (input$filtro_motivo != "Todos") {
-      data <- data %>% filter(motivo == input$filtro_motivo)
     }
     
     data
@@ -207,6 +273,13 @@ server <- function(input, output, session) {
     ticket_filtrado() %>%
       count(sector_origen, name = "cantidad_tickets") %>%
       arrange(desc(cantidad_tickets))
+  })
+  
+  sector_default <- reactive({
+    df <- ticket_resumen()
+    if (nrow(df) == 0) return(NULL)
+    
+    df$sector_origen[1]   # primer sector del ranking
   })
   
   # resumen: importe total solicitado por sector
@@ -240,11 +313,11 @@ server <- function(input, output, session) {
  
   # Estilo común para todas las tarjetas
   card_style_dashboard <- "
-    padding:20px;
-    border-radius:10px;
+    padding:14px 10px;
+    border-radius:8px;
     color:white;
     text-align:center;
-    box-shadow:0 4px 10px rgba(0,0,0,0.15);
+    box-shadow:0 3px 8px rgba(0,0,0,0.14);
   "
   
   
@@ -252,9 +325,9 @@ server <- function(input, output, session) {
   output$card_periodo <- renderUI({
     tags$div(
       style = paste0(card_style_dashboard, "background:#1976d2;"),
-      tags$h3(tags$b(paste0(input$filtro_mes, "/", input$filtro_anio))),
+      tags$h4(tags$b(paste0(input$filtro_mes, "/", input$filtro_anio))),
       tags$div("Período", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-calendar", style="font-size:26px; margin-top:10px;")
+      tags$i(class="fa fa-calendar", style="font-size:40px; margin-top:10px;")
     )
   })
   
@@ -266,9 +339,9 @@ server <- function(input, output, session) {
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#f9a825;"),
-      tags$h3(tags$b(scales::number(total, big.mark = "."))),
+      tags$h4(tags$b(scales::number(total, big.mark = ".", decimal.mark=","))),
       tags$div("Total solicitudes", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-ticket-alt", style="font-size:26px; margin-top:10px;")
+      tags$i(class="fa fa-ticket-alt", style="font-size:40px; margin-top:10px;")
     )
   })
   
@@ -280,11 +353,11 @@ server <- function(input, output, session) {
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#43a047;"),
-      tags$h3(tags$b(
+      tags$h4(tags$b(
         scales::dollar(total, prefix="$", big.mark=".", decimal.mark=",", accuracy=1)
       )),
       tags$div("Importe solicitado", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-money-bill-wave", style="font-size:26px; margin-top:10px;")
+      tags$i(class="fa fa-money-bill-wave", style="font-size:40px; margin-top:10px;")
     )
   })
   
@@ -295,28 +368,145 @@ server <- function(input, output, session) {
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#7e57c2;"),
-      tags$h3(tags$b(
+      tags$h4(tags$b(
         scales::dollar(total, prefix="$", big.mark=".", decimal.mark=",", accuracy=1)
       )),
       tags$div("Importe aprobado", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-check-circle", style="font-size:26px; margin-top:10px;")
+      tags$i(class="fa fa-check-circle", style="font-size:40px; margin-top:10px;")
     )
   })
   
   
   # gráfico: cantidad de tickets
-  output$grafico_tickets <- renderPlot({
-    data <- ticket_resumen()
+  output$grafico_tickets <- plotly::renderPlotly({
+    df <- ticket_resumen() %>%
+      arrange(desc(cantidad_tickets))   # 👈 ordenar desc
     
-    ggplot(data, aes(x = reorder(sector_origen, cantidad_tickets),
-                     y = cantidad_tickets)) +
-      geom_col() +
-      coord_flip() +
+    plotly::plot_ly(
+      df,
+      x = ~cantidad_tickets,            # 👈 horizontal
+      y = ~reorder(sector_origen, cantidad_tickets),
+      type = "bar",
+      orientation = "h",                # 👈 clave
+      source = "sectores"
+    ) %>%
+      layout(
+        xaxis = list(title = "Cantidad de solicitudes"),
+        yaxis = list(title = "Sector"),
+        margin = list(l = 150)            # deja espacio para nombres largos
+      )
+  })
+  
+  
+  observeEvent(plotly::event_data("plotly_click", source = "sectores"), {
+    evento <- plotly::event_data("plotly_click", source = "sectores")
+    req(evento$x)
+    
+    sector_click(evento$y)  # guardamos el sector clickeado
+    
+    updateTabsetPanel(session, "tabs", selected = "Detalle sector")
+  })
+  
+  observeEvent(input$tabla_resumen_rows_selected, {
+    fila <- input$tabla_resumen_rows_selected
+    req(length(fila) == 1)
+    
+    # obtenemos el sector según la fila seleccionada
+    df_resumen <- ticket_resumen()
+    sector_sel <- df_resumen$sector_origen[fila]
+    
+    sector_click(sector_sel)   # usamos el mismo reactiveVal que el gráfico
+    
+    updateTabsetPanel(session, "tabs", selected = "Detalle sector")
+  })
+  
+  # Datos de evolución mensual para el sector clickeado
+  ticket_evolucion_sector <- reactive({
+    sec <- sector_click()
+    if (is.null(sec)) {
+      sec <- sector_default()    # 👈 usamos el primer sector
+    }
+    
+    ticket %>%
+      filter(
+        sector_origen == sec,
+        if (input$filtro_estado != "Todos") estado_resumen_ticket == input$filtro_estado else TRUE,
+        if (input$filtro_area   != "Todos") area == input$filtro_area else TRUE
+      ) %>%
+      group_by(anio, mes) %>%
+      summarise(
+        cantidad           = n(),
+        importe_solicitado = sum(importesolicitado, na.rm = TRUE),
+        importe_aprobado   = sum(importeaprobado,   na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      arrange(anio, mes) %>%
+      mutate(periodo = sprintf("%02d/%d", mes, anio))
+  })
+  
+  
+  # Gráfico de evolución en la pestaña "Detalle sector"
+  output$grafico_evolucion_sector <- renderPlot({
+    df <- ticket_evolucion_sector()
+    req(nrow(df) > 0)
+    
+    ggplot(df, aes(x = periodo, y = importe_aprobado, group = 1)) +
+      geom_line(color = "forestgreen", linewidth = 1.2) +
+      geom_point(size = 3, color = "forestgreen") +
       labs(
-        x = "Sector de origen",
-        y = "Cantidad de solicitudes"
+        x = "Período",
+        y = "Importe aprobado ($)",
+        title = "Evolución mensual del importe aprobado"
       ) +
-      theme_minimal()
+      scale_y_continuous(
+        labels = function(x) scales::dollar(x, prefix = "$", big.mark = ".", decimal.mark = ",")
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title  = element_text(size = 14, face = "bold")
+      )
+  })
+  
+  # Tabla de evolución debajo del gráfico
+  output$tabla_evolucion_sector <- DT::renderDT({
+    df <- ticket_evolucion_sector()
+    
+    df2 <- df %>%
+      mutate(
+        porcentaje_aprobado = ifelse(
+          importe_solicitado > 0,
+          importe_aprobado / importe_solicitado * 100,
+          NA
+        )
+      ) %>%
+      transmute(
+        Período                = periodo,
+        `Cant. solicitudes` = cantidad,
+        `Importe solicitado`   = scales::dollar(
+          importe_solicitado,
+          prefix = "$", big.mark = ".", decimal.mark = ",", accuracy = 1
+        ),
+        `Importe aprobado`     = scales::dollar(
+          importe_aprobado,
+          prefix = "$", big.mark = ".", decimal.mark = ",", accuracy = 1
+        ),
+        `% aprobado` = scales::percent(
+          porcentaje_aprobado / 100,
+          accuracy = 0.1,
+          decimal.mark = ","
+        )
+      )
+    
+    datatable(
+      df2,
+      options = list(
+        pageLength = 12,
+        columnDefs = list(
+          list(targets = c(2, 3, 4, 5), className = "dt-right")   
+        )
+      )
+    )
   })
   
   # gráfico: importe total solicitado por sector (en millones)
@@ -341,23 +531,24 @@ server <- function(input, output, session) {
   
   # tabla con el resumen (cantidad por sector)
   output$tabla_resumen <- DT::renderDataTable({
-    ticket_resumen()
-  },
-  options = list(
-    pageLength = 10,       # filas por página
-    lengthChange = TRUE,   # permitir cambiar cantidad de filas
-    searching = TRUE,      # buscador
-    ordering = TRUE,       # ordenar por columnas
-    scrollX = TRUE         # scroll horizontal si hace falta
-  ))
+    datatable(
+      ticket_resumen(),
+      colnames = c("Sector", "Cantidad de tickets"),
+      selection = "single",
+      options = list(
+        pageLength   = 10,       # filas por página
+        lengthChange = TRUE,     # permitir cambiar cantidad de filas
+        searching    = TRUE,     # buscador
+        ordering     = TRUE,     # ordenar por columnas
+        scrollX      = TRUE      # scroll horizontal si hace falta
+      )
+    )
+  })
   
   # tabla con el resumen (importes por sector)
   output$tabla_importes <- DT::renderDataTable({
     
     data <- ticket_importes() %>%
-      mutate(
-        importe_total = round(importe_total, 0)  # sin decimales
-      ) %>%
       select(
         sector_origen,
         importe_total,
@@ -366,17 +557,28 @@ server <- function(input, output, session) {
     
     dt <- DT::datatable(
       data,
-      colnames = c("Sector", "Importe total", "Importe (millones)"),
+      colnames = c("Sector", "Importe total", "Imp. (millones)"),
       options = list(
         pageLength   = 10,
         lengthChange = TRUE,
         ordering     = TRUE,
         searching    = FALSE,
-        scrollX      = TRUE
+        scrollX      = TRUE,
+        columnDefs = list(
+          list(className = "dt-right", targets = c(1, 2, 3))  # columnas de importes a la derecha
+        )
       )
-    )
+    ) %>%
+      # 👇 Formateamos importe_total con . y , y símbolo $
+      DT::formatCurrency(
+        "importe_total",
+        currency = "$",
+        mark = ".",        # separador de miles
+        dec.mark = ",",    # separador decimales
+        digits = 0         # sin decimales
+      )
     
-    # Colorear según el importe total (barra de intensidad en la celda)
+    # Colorear según el importe total (barra azul)
     dt %>%
       DT::formatStyle(
         "importe_total",
@@ -388,10 +590,20 @@ server <- function(input, output, session) {
         backgroundRepeat   = "no-repeat",
         backgroundPosition = "center"
       )
-    
   })
   
   
+  
+  output$titulo_detalle_sector <- renderText({
+    sec <- sector_click()
+    
+    # si no hay nada seleccionado, usamos el primer sector del ranking
+    if (is.null(sec)) {
+      sec <- sector_default()
+    }
+    
+    paste("Evolución del sector:", sec)
+  })
 }
 
 shinyApp(ui, server)

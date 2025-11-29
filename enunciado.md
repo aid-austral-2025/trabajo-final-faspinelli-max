@@ -84,4 +84,4 @@ Los siguientes aspectos deben ser tenidos en cuenta y formarán parte de la eval
 -   El trabajo es **individual**.
 -   La fecha límite de entrega es el domingo 30/11 a la medianoche. Cumplida esa hora, los docentes clonarán el repo de cada grupo y con lo obtenido se procederá a la evaluación. No se tendrán en cuenta *commits* realizados con posterioridad.
 -   Se promueve la discusión entre estudiantes y docentes, pero queda prohibido el intercambio de código u otro tipo de ayuda entre estudiantes.
--   Para realizar consultas con los docentes, abrir un *issue* en el repo del grupo, escribir la consulta y **etiquetar a ambos docentes*.
+-   Para realizar consultas con los docentes, abrir un *issue* en el repo del grupo, escribir la consulta y \*\*etiquetar a ambos docentes\*.

@@ -36,14 +36,20 @@ ticket$ticket_finalizado <- as.logical(ticket$ticket_finalizado)
 ticket$ticket_mercaderiarecibida <- as.logical(ticket$ticket_mercaderiarecibida)
 
 #paso a mayusculas columnas de textos que son ingresadas por los usuarios finales
+#no utilizadas para este trabajo.
 
 ticket$descripcion <- toupper(ticket$descripcion)
 ticket$asunto <- toupper(ticket$asunto)
 ticket$tipofondocomentario <- toupper(ticket$tipofondocomentario)
 
-#nos quedamos solo con las solicitudes activas
+#nos quedamos solo con las solicitudes activas y finalizadas
 ticket <- ticket %>%
-  filter(activo == TRUE)
+  filter(activo == TRUE & ticket_finalizado == TRUE)
+
+#eliminamos las solicitudes con importe > 0
+ticket <- ticket %>%
+  filter(importesolicitado > 0)
+
 
 #eliminamos los ticket fusionados(ya que existen en un nuevo ticket) y Cancelados (cargados por error)
 ticket <- ticket %>%
@@ -51,6 +57,7 @@ ticket <- ticket %>%
 
 #pasamos a fecha las columnas tipo fecha
 ticket$fecha <- as.Date(ticket$fecha)
+ticket$ticket_updated_at <- as.Date(ticket$ticket_updated_at)
 ticket$fechavenc <- as.Date(ticket$fechavenc)
 
 #listamos las columnas para saber cuales no son necesarias o indican id
@@ -60,26 +67,28 @@ ticket$fechavenc <- as.Date(ticket$fechavenc)
 #y eliminamos columnas que no tienen información importante
 
 ticket <- ticket %>%
-  select (fecha,
-          fechavenc,
-          area,
-          sede_nombre_sectororigen,
-          sector_origen,
-          motivo,
-          comprobante,
-          asunto,
-          descripcion,
-          prioridad,
-          importesolicitado,
-          importeaprobado,
-          razonsocial,
-          tipofondo,
-          tipofondocomentario,
-          estado_activo_nombre,
-          sede_nombre_sectoractual,
-          sector_actual_nombre,
-          ticket_mercaderiarecibida,
-          ticket_finalizado)
+  select (
+    fechainicio = fecha,
+    fechafin = ticket_updated_at,
+    fechavenc,
+    area,
+    sede_nombre_sectororigen,
+    sector_origen,
+    motivo,
+    comprobante,
+    asunto,
+    descripcion,
+    prioridad,
+    importesolicitado,
+    importeaprobado,
+    razonsocial,
+    tipofondo,
+    tipofondocomentario,
+    estado_activo_nombre,
+    sede_nombre_sectoractual,
+    sector_actual_nombre,
+    ticket_mercaderiarecibida,
+    ticket_finalizado)
 
 #agregamos columnas de año, mes, y mes en letras
 meses_castellano <- c(
@@ -90,8 +99,8 @@ meses_castellano <- c(
 
 ticket <- ticket %>%
   mutate(
-    anio = format(fecha, "%Y") %>% as.integer(),
-    mes  = format(fecha, "%m") %>% as.integer(),
+    anio = format(fechafin, "%Y") %>% as.integer(),
+    mes  = format(fechafin, "%m") %>% as.integer(),
     mes_label = meses_castellano[mes]
   )
 
@@ -225,11 +234,16 @@ ui <- fluidPage(
           "Acerca del Tablero",
           h2("Descripción del tablero"),
           p("
-            
-          "),
+            Para este trabajo final utilizamos un dataset real con información de las 
+            solicitudes de compra realizadas por los distintos sectores y disciplinas de un club. 
+            Los datos provienen de una base PostgreSQL y fueron exportados desde una 
+            vista que contiene únicamente las cabeceras de cada solicitud y su estado.
+            "),
           p("
-            
-          "),
+            No se analizan los ítems detallados dentro de cada solicitud, ni los sectores 
+            intermedios por los que va pasando durante su circuito interno.
+            Nos Hemos quedado con las solicitudes que han sido finalizadas.
+            "),
           p("
             .
           "

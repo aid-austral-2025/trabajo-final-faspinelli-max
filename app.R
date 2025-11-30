@@ -113,12 +113,34 @@ ticket <- ticket %>%
     )
   )
 
-# definimos os filtros
+#########################
+# UI                    #
+# definimos los filtros #
+#########################
+
 ui <- fluidPage(
   
   tags$head(
-    tags$link(rel="stylesheet",
-              href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css")
+    tags$link(
+      rel="stylesheet",
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    ),
+    tags$style(HTML("
+    .kpi-value {
+      font-size:24px;
+      font-weight:700;
+      margin-top:4px;
+    }
+    .kpi-label {
+      font-size:15px;
+      margin-top:8px;
+      opacity:0.9;
+    }
+    .kpi-icon {
+      font-size:26px;
+      margin-top:12px;
+    }
+  "))
   ),
   
   tags$h1(
@@ -175,7 +197,7 @@ ui <- fluidPage(
           
           fluidRow(
             style = "margin-top:20px;",
-            column(3, uiOutput("card_periodo")),
+            column(3, uiOutput("card_promedio_dias")),
             column(3, uiOutput("card_tickets")),
             column(3, uiOutput("card_importe_solicitado")),
             column(3, uiOutput("card_importe_aprobado"))
@@ -242,12 +264,34 @@ ui <- fluidPage(
           p("
             No se analizan los ítems detallados dentro de cada solicitud, ni los sectores 
             intermedios por los que va pasando durante su circuito interno.
-            Nos Hemos quedado con las solicitudes que han sido finalizadas.
+            Las solicitudes que se visualizan tienen el estado de finalizada.
+            No se tienen en cuenta aquellas que todavía están en proceso, 
+            tanto de aprobación y/o finalización.
             "),
           p("
-            .
-          "
-          )
+            Las solicitudes siguen un flujo en el que intervienen varios sectores. 
+            Compras realiza la cotización y luego Gerencia decide si aprueba, modifica 
+            o rechaza la solicitud. Si se rechaza, el proceso termina.
+            "),
+          p("
+            El tablero permite explorar esta información de forma simple e interactiva. 
+            A la izquierda se encuentran los filtros para seleccionar año, mes, área 
+            y estado, los cuales actualizan todo el contenido de manera dinámica.
+          "),
+          p("
+            En la solapa 'Resumen' se muestran los principales indicadores del período 
+            (cantidad de solicitudes e importes solicitados y aprobados). Tanto el 
+            gráfico como la tabla permiten seleccionar un sector para ir directamente 
+            a la solapa 'Detalle sector'.
+          "),
+          p("
+            En la vista de detalle se muestra la evolución mensual del sector elegido. 
+            Si se ingresa sin haber elegido uno, el tablero muestra automáticamente el 
+            sector con mayor cantidad de solicitudes en el período filtrado.
+          "),
+          p("
+            Aclaración: En el área Club hay información desde julio/2025 y en Disciplinas desde septiembre/2025
+          ")
         )
       )
     )
@@ -327,81 +371,118 @@ server <- function(input, output, session) {
  
   # Estilo común para todas las tarjetas
   card_style_dashboard <- "
-    padding:14px 10px;
-    border-radius:8px;
+    padding:16px;
+    border-radius:10px;
     color:white;
     text-align:center;
-    box-shadow:0 3px 8px rgba(0,0,0,0.14);
+    box-shadow:0 4px 10px rgba(0,0,0,0.15);
+    min-height:140px;
+  
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-start;
   "
   
   
-  # 🟦 Período
-  output$card_periodo <- renderUI({
+  # Promedio de días para resolver solicitudes del período filtrado
+  output$card_promedio_dias <- renderUI({
+    df <- ticket_filtrado() %>%
+      dplyr::filter(ticket_finalizado == TRUE) %>%
+      dplyr::filter(!is.na(fechainicio), !is.na(fechafin)) %>%
+      dplyr::mutate(
+        dias_resolucion = as.numeric(fechafin - fechainicio, units = "days")
+      )
+    
+    prom_dias <- mean(df$dias_resolucion, na.rm = TRUE)
+    valor_mostrar <- if (is.nan(prom_dias)) "-" else
+      scales::number(prom_dias, accuracy = 0.1,
+                     decimal.mark = ",", big.mark = ".")
+    
     tags$div(
       style = paste0(card_style_dashboard, "background:#1976d2;"),
-      tags$h4(tags$b(paste0(input$filtro_mes, "/", input$filtro_anio))),
-      tags$div("Período", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-calendar", style="font-size:40px; margin-top:10px;")
+      tags$div(valor_mostrar, class = "kpi-value"),
+      tags$div("Promedio de días de resolución", class = "kpi-label"),
+      tags$i(class="fa-solid fa-clock-rotate-left kpi-icon")
     )
   })
-  
   
   # Total solicitudes
   output$card_tickets <- renderUI({
-    df <- ticket_filtrado()
-    total <- nrow(df)
+    total <- nrow(ticket_filtrado())
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#f9a825;"),
-      tags$h4(tags$b(scales::number(total, big.mark = ".", decimal.mark=","))),
-      tags$div("Total solicitudes", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-ticket-alt", style="font-size:40px; margin-top:10px;")
+      tags$div(
+        scales::number(total, big.mark=".", decimal.mark=","),
+        class = "kpi-value"
+      ),
+      tags$div("Total solicitudes", class = "kpi-label"),
+      tags$i(class="fa-solid fa-ticket kpi-icon")
     )
   })
-  
   
   # Importe solicitado
   output$card_importe_solicitado <- renderUI({
-    df <- ticket_filtrado()
-    total <- sum(df$importesolicitado, na.rm = TRUE)
+    total <- sum(ticket_filtrado()$importesolicitado, na.rm = TRUE)
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#43a047;"),
-      tags$h4(tags$b(
-        scales::dollar(total, prefix="$", big.mark=".", decimal.mark=",", accuracy=1)
-      )),
-      tags$div("Importe solicitado", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-money-bill-wave", style="font-size:40px; margin-top:10px;")
+      
+      # Valor
+      tags$div(
+        scales::dollar(total,
+                       prefix = "$",
+                       big.mark = ".",
+                       decimal.mark = ",",
+                       accuracy = 1),
+        class = "kpi-value"
+      ),
+      
+      # Etiqueta
+      tags$div("Importe solicitado", class = "kpi-label"),
+      
+      # Ícono
+      tags$i(class = "fa-solid fa-money-bill-wave kpi-icon")
     )
   })
   
+  
   # Importe aprobado
   output$card_importe_aprobado <- renderUI({
-    df <- ticket_filtrado()
-    total <- sum(df$importeaprobado, na.rm = TRUE)
+    total <- sum(ticket_filtrado()$importeaprobado, na.rm = TRUE)
     
     tags$div(
       style = paste0(card_style_dashboard, "background:#7e57c2;"),
-      tags$h4(tags$b(
-        scales::dollar(total, prefix="$", big.mark=".", decimal.mark=",", accuracy=1)
-      )),
-      tags$div("Importe aprobado", style="font-size:15px; opacity:0.9;"),
-      tags$i(class="fa fa-check-circle", style="font-size:40px; margin-top:10px;")
+      
+      tags$div(
+        scales::dollar(total,
+                       prefix = "$",
+                       big.mark = ".",
+                       decimal.mark = ",",
+                       accuracy = 1),
+        class = "kpi-value"
+      ),
+      
+      tags$div("Importe aprobado", class = "kpi-label"),
+      
+      tags$i(class = "fa-solid fa-check-circle kpi-icon")
     )
   })
+  
   
   
   # gráfico: cantidad de tickets
   output$grafico_tickets <- plotly::renderPlotly({
     df <- ticket_resumen() %>%
-      arrange(desc(cantidad_tickets))   # 👈 ordenar desc
+      arrange(desc(cantidad_tickets))   #  ordenar desc
     
     plotly::plot_ly(
       df,
-      x = ~cantidad_tickets,            # 👈 horizontal
+      x = ~cantidad_tickets,            #  horizontal
       y = ~reorder(sector_origen, cantidad_tickets),
       type = "bar",
-      orientation = "h",                # 👈 clave
+      orientation = "h",                #  clave
       source = "sectores"
     ) %>%
       layout(
@@ -438,7 +519,7 @@ server <- function(input, output, session) {
   ticket_evolucion_sector <- reactive({
     sec <- sector_click()
     if (is.null(sec)) {
-      sec <- sector_default()    # 👈 usamos el primer sector
+      sec <- sector_default()    # usamos el primer sector
     }
     
     ticket %>%
@@ -583,7 +664,7 @@ server <- function(input, output, session) {
         )
       )
     ) %>%
-      # 👇 Formateamos importe_total con . y , y símbolo $
+      # Formateamos importe_total con . y , y símbolo $
       DT::formatCurrency(
         "importe_total",
         currency = "$",
@@ -605,8 +686,6 @@ server <- function(input, output, session) {
         backgroundPosition = "center"
       )
   })
-  
-  
   
   output$titulo_detalle_sector <- renderText({
     sec <- sector_click()
